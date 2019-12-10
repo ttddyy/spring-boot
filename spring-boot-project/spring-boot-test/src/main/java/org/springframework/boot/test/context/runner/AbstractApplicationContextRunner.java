@@ -17,6 +17,7 @@
 package org.springframework.boot.test.context.runner;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.function.Consumer;
@@ -36,10 +37,15 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationContextInitializer;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.AnnotationConfigRegistry;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.DeferredImportSelector;
+import org.springframework.context.annotation.Import;
 import org.springframework.context.support.GenericApplicationContext;
+import org.springframework.core.Ordered;
 import org.springframework.core.ResolvableType;
 import org.springframework.core.env.Environment;
 import org.springframework.core.io.DefaultResourceLoader;
+import org.springframework.core.type.AnnotationMetadata;
 import org.springframework.util.Assert;
 
 /**
@@ -412,11 +418,45 @@ public abstract class AbstractApplicationContextRunner<SELF extends AbstractAppl
 		this.environmentProperties.applyTo(context);
 		Class<?>[] classes = Configurations.getClasses(this.configurations);
 		if (classes.length > 0) {
-			((AnnotationConfigRegistry) context).register(classes);
+			// TODO: need a way to distinguish auto configuration classes(AutoConfigurations)
+			String[] autoConfigs = Arrays.stream(classes)
+					.map(Class::getName)
+					.filter(name -> name.endsWith("AutoConfiguration"))
+					.toArray(String[]::new);
+
+			ApplicationContextRunnerAutoConfigurationImportSelector.IMPORTS = autoConfigs;
+
+			Class<?>[] configs = Arrays.stream(classes)
+					.filter(clazz -> !clazz.getName().endsWith("AutoConfiguration"))
+					.toArray(Class<?>[]::new);
+
+			((AnnotationConfigRegistry) context).register(configs);
+			((AnnotationConfigRegistry) context).register(ApplicationContextRunnerAutoConfigurationImporter.class);
 		}
 		this.beanRegistrations.forEach((registration) -> registration.apply(context));
 		this.initializers.forEach((initializer) -> initializer.initialize(context));
 		context.refresh();
+	}
+
+	@Configuration
+	@Import(ApplicationContextRunnerAutoConfigurationImportSelector.class)
+	static class ApplicationContextRunnerAutoConfigurationImporter {
+	}
+
+	private static class ApplicationContextRunnerAutoConfigurationImportSelector implements DeferredImportSelector, Ordered {
+		static String[] IMPORTS;
+
+		@Override
+		public String[] selectImports(AnnotationMetadata annotationMetadata) {
+			System.out.println("AAA selectImports=" + Arrays.toString(IMPORTS));
+			return IMPORTS;
+		}
+
+		@Override
+		public int getOrder() {
+			// same as AutoConfigurationImportSelector
+			return Ordered.LOWEST_PRECEDENCE - 1;
+		}
 	}
 
 	private void accept(ContextConsumer<? super A> consumer, A context) {
